@@ -4,7 +4,6 @@
 
  All_Defs.h - This file contains defintions etc. that are 'universal',
               i.e. they deal with the UI, shared functions, etc.
-			  random chage
 */
 
 #pragma once
