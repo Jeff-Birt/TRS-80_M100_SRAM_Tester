@@ -72,6 +72,7 @@ enum REFRESH_STATES
 void clearDisplay(); // helper to clear display set cursor position
 void doTests(int startAddress, int numBytes, int reps); // do set of tests
 int getBtn(); // returns analog button pressed
+void logError(int address, byte written, byte read, String lable); // helper to log erros
 unsigned int readPattern(int startAddress, int numBytes, byte pattern);
 bool runTest(int reps, byte pattern, int startAddress, int numBytes, String lable);
 bool walkTest(int reps, int startAddress, int numBytes, byte state, String lable); // do march type test

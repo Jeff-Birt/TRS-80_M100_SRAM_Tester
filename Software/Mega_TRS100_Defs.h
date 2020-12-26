@@ -131,18 +131,19 @@ void initTest()
 // by the 'readBits' and 'writeBits' functions. 
 void setAddress(int address)
 {
-	PORTA = (byte)(address & 0xFF); // bits 0-7
-	int cePins = (address & 0x1800); //mask off virtual A11 and A12
-	cePins = cePins >> 11; // shift A11/A12 to LSB 
-	cePins = 0x01 << cePins; // shift 0x01 << cePins # to select correct RAM
-	cePins = cePins << 3; // shift left 3x more to align with CE pins
-	cePins = cePins ^ 0x78; // invert state for active low
+	PORTA = (byte)(address & 0xFF);		// bits 0-7
+	int cePins = (address & 0x1800);	//mask off virtual A11 and A12
+	cePins = cePins >> 11;		// shift A11/A12 to LSB 
+	cePins = 0x01 << cePins;	// shift 0x01 << cePins # to select correct RAM
+	cePins = cePins << 3;		// shift left 3x more to align with CE pins
+	cePins = cePins ^ 0x78;		// invert state for active low
 
 	//CE pins are active low, need to invert the pin state
 	int PCNew = ((address & 0x700) >> 8); // mask off A8-A10 shift over
 	PCNew = PCNew | cePins; // select correct RAM chip
-	PCNew = PCNew;// &(CEX ^ 0xFF);
-	PORTC = (byte)PCNew; // update actual port
+	PCNew = PCNew;			// &(CEX ^ 0xFF);
+	PORTC = (byte)PCNew;	// update actual port
+	NOP;					// NOP gives pins time to settle
 }
 
 // Read from data bus (PortL, Pins 0-7)
@@ -151,9 +152,10 @@ void setAddress(int address)
 inline byte readBits()
 {
 	PORTC = PINC & ~CEX; // lower global CE
-	NOP;				 // may not need the NOP
+	NOP;				 // NOP gives pins time to settle
 	byte value =  PINL;	 // read dta bus
 	PORTC = PINC | CEX;  // raise global CE
+	NOP;				 // NOP gives pins time to settle
 	return value;
 }
 
@@ -166,6 +168,7 @@ inline void writeBits(byte state)
 	NOP;				 // may not need NOP
 	PORTL = state;		 // write to data bus
 	PORTC = PINC | CEX;  // raise global CE
+	NOP;				 // NOP gives pins time to settle
 }
 
 // Set /WE low for to enable a write
@@ -173,6 +176,7 @@ inline void setWE()
 {
 	DDRL = PL_TRS100_TestWr; // data bus to write mode
 	PORTH = PORTH & ~WE;  
+	NOP;				 // NOP gives pins time to settle
 }
 
 // Set /WE high to complete write
@@ -180,6 +184,7 @@ inline void resetWE()
 {
   PORTH = PORTH | WE;
   DDRL = PL_TRS100_TestRd; //databus to read mode
+  NOP;				 // NOP gives pins time to settle
 }
 
 // Turn on the +/- 5V DC-DC converter

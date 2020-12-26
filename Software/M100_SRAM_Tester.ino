@@ -25,11 +25,15 @@ int testSelected = 0;			// Index of test selected
 int startAddress = 0;			// 0, 2048, 4096, 6144
 int numBytes = 8192;			// 4x2K bytes
 int btn = 0;					// hold button prressed
+int btnLast = 0;				// last button pressed
+int btnHeld = 0;				// # cycles button has been held down
+const int btnRepeat = 20;		// 10 * 100ms = 1s key repeat
 int reps = 1;					// # of test reps
 
 const int maxTests = 5;			// const for test names
 String TEST_NAME[maxTests] = { "All", "C1", "C2", "C3", "C4" };	// could use PROGMEM to put these in flash
-int failures[4] = { 0,0,0,0 };	// keep track of #failures per SRAM chip
+const int numChips = 4;			// number of individual SRAM chips
+int failures[numChips] = { 0,0,0,0 };	// keep track of #failures per SRAM chip
 bool verbose = false;			// set to 'true' to enable verbose serial output
 
 // the setup function runs once when you press reset or power the board
@@ -42,7 +46,7 @@ void setup()
 	TCCR3B = (TCCR3B & B11111000) | 0x03; // set DRAM/LED timer to 2ms
 	ENABLE_REFRESH;						  // start timer
 
-	Serial.begin(9600);				// Only used for debugging
+	Serial.begin(19200);				// Only used for debugging
 	Serial.println("Setup");
 
 	// set up OLED display
@@ -71,8 +75,8 @@ void initUI()
 // We use the loop function for the UI
 void loop()
 {
-
-	delay(200);		// key repeat timer
+	delay(100);		// cycle through UI every 100ms
+	btn = getBtn();	// get button pressed code
 
 	switch (uistate)
 	{
@@ -100,7 +104,7 @@ void loop()
 			{
 				if (i >= testSelected & i< testSelected+3)
 				{
-					i == testSelected ? display.print(">") : display.print(" ");
+					i == testSelected ? display.print(F(">")) : display.print(F(" "));
 					display.println(TEST_NAME[i]);
 				}
 			}
@@ -110,7 +114,6 @@ void loop()
 			break;
 
 		case SELECT:
-			btn = getBtn();
 			if (btn == 1)
 			{
 				uistate = TIMES;
@@ -136,7 +139,6 @@ void loop()
 			display.println(reps);
 			display.display();
 
-			btn = getBtn();
 			if (btn == 1)
 			{
 				uistate = TEST;
@@ -173,7 +175,6 @@ void loop()
 			break;
 
 		case CONT:
-			btn = getBtn();
 			if (btn > 0) 
 			{ 
 				clearDisplay();
@@ -181,18 +182,17 @@ void loop()
 				display.println(F("Yes ___  No"));
 				display.display();
 				uistate = AGAIN; 
-				delay(500); // time to take finger off button
+				delay(2000); // time to take finger off button
 			}
 
 		case AGAIN:
-			btn = getBtn();
-
 			if (btn == 1)
 			{
 				uistate = SPLASH;
 			}
 			else if (btn == 4)
 			{
+				// run samne test again
 				uistate = TEST;
 			}
 			break;
@@ -207,7 +207,28 @@ int getBtn()
 {
 	int result = 0;
 	int keyIn = (PINF &0x07) ^ 0x07; // mask off bits 0-2, invert
-	if ((keyIn & (keyIn - 1)) == 0) { result = keyIn; }
+	if ((keyIn & (keyIn - 1)) == 0) { result = keyIn; } // filter out multiple buttons
+
+	// keep track of last button passed, if differnet button pressed log it
+	// if same button pressed and # repeats < btnRepeat return 0
+	// if same button pressed and # repeats >= btnRepeat return btnLast
+	if (result != btnLast) 
+	{ 
+		btnLast = result;
+		btnHeld = 0;
+	}
+	else
+	{
+		btnHeld++;
+		if (btnHeld >= btnRepeat) 
+		{
+			btnHeld = btnRepeat * 0.75; // reset repeat timer to 3/4 for repeat rate
+		}
+		else
+		{
+			result = 0;
+		}
+	}
 	
 	return result;
 }
@@ -217,12 +238,14 @@ int getBtn()
 void doTests(int startAddress, int numBytes, int reps)
 {
 	bool failure = false;
-	failures[0] = failures[1] = failures[2] = failures[3] = 0;
 	int miss = 0;
 
-	initTest();
-	turn5VOn();
-	delay(2000);	   // time for DC-DC converter to come up
+	initTest();		// initialize ports/pins to test mode
+	turn5VOn();		// turn on +/- 5V power
+	delay(2000);	// time for DC-DC converter to stabilize
+
+	// zero out failure counters
+	for (int i = 0; i < numChips; i++) { failures[i] = 0; }
 
 	// test with checkerboard patterns
 	failure |= runTest(reps, 0x55, startAddress, numBytes, F("Fill 0x55"));
@@ -238,18 +261,21 @@ void doTests(int startAddress, int numBytes, int reps)
 	failure |= walkTest(reps, startAddress, numBytes, 0x00, F("March 0x00"));
 	delay(2000);
 
-	// display final results
+	// display final results, shows all C#s that have failures logged
 	clearDisplay();
-	failure ? display.println(F("Failed")) : display.println(F("Passed"));
-	display.print("C1:" + String(failures[0], HEX));
-	display.println(" C2:" + String(failures[1], HEX));
-	display.print("C3:" + String(failures[2], HEX));
-	display.println(" C4:" + String(failures[3], HEX));
+	failure ? display.println(F("--Failed")) : display.println(F("--Passed"));
+	for (int i = 0; i < numChips; i++)
+	{
+		if (failures[i] > 0)
+		{
+			display.print("C" + String(i+1) + " ");
+		}
+	}
+
 	display.display();
 
-	//ledstate = failure ? LED_OFF : LED_ON;
-	initStandby();
 	turn5VOff();
+	initStandby();
 }
 
 // runs an individual checkerboard type test
@@ -300,6 +326,7 @@ bool walkTest(int reps, int startAddress, int numBytes, byte state, String lable
 
 		for (int i = startAddress; i < numBytes; i++)
 		{
+			//if (i == 2048) { i = 6144; } // skip from C1 to C4
 			setAddress(i);
 			byte readValue = readBits();
 
@@ -315,62 +342,13 @@ bool walkTest(int reps, int startAddress, int numBytes, byte state, String lable
 				if (readValue != walkValue)
 				{
 					miss++;
-					if (i < 2048)
-					{
-						failures[0]++;
-					}
-					else if (i < 4096)
-					{
-						failures[1]++;
-					}
-					else if (i < 6144)
-					{
-						failures[2]++;
-					}
-					else
-					{
-						failures[3]++;
-					}
-
-					if (verbose)
-					{
-						Serial.print("WTW A:"); // serial dump of errors
-						Serial.print(i, HEX);
-						Serial.print(", W:");
-						Serial.print(walkValue, HEX);
-						Serial.print(", R:");
-						Serial.println(readValue, HEX);
-					}
+					logError(i, walkValue, readValue, "WTW:");
 				}
 			}
 			else
 			{
 				miss++;
-				if (i < 2048)
-				{
-					failures[0]++;
-				}
-				else if (i < 4096)
-				{
-					failures[1]++;
-				}
-				else if (i < 6144)
-				{
-					failures[2]++;
-				}
-				else
-				{
-					failures[3]++;
-				}
-				if (verbose)
-				{
-					Serial.print("WTF A:"); // serial dump of errors
-					Serial.print(i, HEX);
-					Serial.print(", W:");
-					Serial.print(state, HEX);
-					Serial.print(", R:");
-					Serial.println(readValue, HEX);
-				}
+				logError(i, state, readValue, "WTF:");
 			}
 		}
 	}
@@ -417,32 +395,7 @@ unsigned int readPattern(int startAddress, int numBytes, byte pattern)
 		if (read != pattern) 
 		{
 			miss++;
-			if (i < 2048)
-			{
-				failures[0]++;
-			}
-			else if (i < 4096)
-			{
-				failures[1]++;
-			}
-			else if (i < 6144)
-			{
-				failures[2]++;
-			}
-			else
-			{
-				failures[3]++;
-			}
-
-			if (verbose)
-			{
-				Serial.print("RP:"); // serial dump of errors
-				Serial.print(i, HEX);
-				Serial.print(", W:");
-				Serial.print(pattern, HEX);
-				Serial.print(", R:");
-				Serial.println(read, HEX);
-			}
+			logError(i, pattern, read, "ReadPattern:");
 		}
 
 		value++;
@@ -451,6 +404,10 @@ unsigned int readPattern(int startAddress, int numBytes, byte pattern)
 	return miss;
 }
 
+//-----------------------------------------------------------------------------
+// Helpers 
+//-----------------------------------------------------------------------------
+
 // helper to clear display and set correct cursor location
 void clearDisplay()
 {
@@ -458,6 +415,26 @@ void clearDisplay()
 	display.setCursor(0, 12); // Start at top-left corner
 }
 
+// helper to log errors
+void logError(int address, byte written, byte read, String lable)
+{
+	int index = ((address / 2048) + 0.5); // which SRAM chip?
+	failures[index]++;
+
+	// serial dump of errors if in verbose mode
+	// ***NOTE: the index==1` test used to find false error when 
+	// changing from C1 to C1, added NOP in setAddress 
+	if (verbose /*& index == 1*/)
+	{
+		Serial.print(lable + " A:" + String (address, HEX));
+		Serial.print(", W:" + String(written, HEX));
+		Serial.println(", R:" + String(read, HEX));
+	}
+}
+
+//-----------------------------------------------------------------------------
+// HISR handler 
+//-----------------------------------------------------------------------------
 
 // Handles LED flashing
 // NOTE: Serial writes can interfere with this ISR timing
@@ -482,7 +459,4 @@ ISR(TIMER3_OVF_vect)
 		ledOFF();
 	}
 }
-
-
-
 
