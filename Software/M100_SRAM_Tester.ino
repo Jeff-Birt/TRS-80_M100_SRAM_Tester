@@ -1,9 +1,6 @@
 /*
  Arduino_TRS-80_M100_SRAM_Tester
  Jeffrey T. Birt (Hey Birt!) http://www.soigeneris.com , http://www.youtube.com/c/HeyBirt
-
- ToDo: write log helper function
-       improve per chip error recording
  */
 
 #include "All_Defs.h"
@@ -27,7 +24,8 @@ int numBytes = 8192;			// 4x2K bytes
 int btn = 0;					// hold button prressed
 int btnLast = 0;				// last button pressed
 int btnHeld = 0;				// # cycles button has been held down
-const int btnRepeat = 20;		// 10 * 100ms = 1s key repeat
+const int btnValid = 10;		// debounce button delay
+const int btnRepeat = 150;		// 1000 * 1ms = 1s key repeat
 int reps = 1;					// # of test reps
 
 const int maxTests = 5;			// const for test names
@@ -65,6 +63,10 @@ void setup()
 	display.cp437(true);			// Use full 256 char 'Code Page 437' font
 }
 
+//-----------------------------------------------------------------------------
+// UI 
+//-----------------------------------------------------------------------------
+
 // Initialize the user interface port
 void initUI()
 {
@@ -75,7 +77,7 @@ void initUI()
 // We use the loop function for the UI
 void loop()
 {
-	delay(100);		// cycle through UI every 100ms
+	delay(10);		// cycle through UI every 10ms
 	btn = getBtn();	// get button pressed code
 
 	switch (uistate)
@@ -110,14 +112,13 @@ void loop()
 			}
 
 			display.display();
-			uistate = SELECT;
+			uistate = SELECT1;
 			break;
 
-		case SELECT:
+		case SELECT1:
 			if (btn == 1)
 			{
 				uistate = TIMES;
-				delay(500); // time to take finger off button
 			}
 			else if (btn == 2)
 			{
@@ -138,7 +139,10 @@ void loop()
 			display.println(F("# of Reps?"));
 			display.println(reps);
 			display.display();
+			uistate = SELECT2;
+			break;
 
+		case SELECT2:
 			if (btn == 1)
 			{
 				uistate = TEST;
@@ -146,11 +150,13 @@ void loop()
 			else if (btn == 2)
 			{
 				reps--;
-				if (reps < 0) { reps = 0; }
+				if (reps < 1) { reps = 1; }
+				uistate = TIMES;
 			}
 			else if (btn == 4)
 			{
 				reps++;
+				uistate = TIMES;
 			}
 			break;
 
@@ -182,8 +188,8 @@ void loop()
 				display.println(F("Yes ___  No"));
 				display.display();
 				uistate = AGAIN; 
-				delay(2000); // time to take finger off button
 			}
+			break;
 
 		case AGAIN:
 			if (btn == 1)
@@ -209,29 +215,40 @@ int getBtn()
 	int keyIn = (PINF &0x07) ^ 0x07; // mask off bits 0-2, invert
 	if ((keyIn & (keyIn - 1)) == 0) { result = keyIn; } // filter out multiple buttons
 
-	// keep track of last button passed, if differnet button pressed log it
-	// if same button pressed and # repeats < btnRepeat return 0
-	// if same button pressed and # repeats >= btnRepeat return btnLast
+	// This is where we do button debouncing and key repeat
 	if (result != btnLast) 
 	{ 
 		btnLast = result;
 		btnHeld = 0;
+		result = 0;
 	}
-	else
+	else if (result != 0)				// don't want to auto-repeat zero 
 	{
 		btnHeld++;
-		if (btnHeld >= btnRepeat) 
+		if (btnHeld < btnValid)
 		{
-			btnHeld = btnRepeat * 0.75; // reset repeat timer to 3/4 for repeat rate
+			result = 0;					// return zero until debounced
 		}
-		else
+		else if (btnHeld == btnValid)
 		{
-			result = 0;
+			result = result;			// return debounced btn once
+		}
+		else if ((btnHeld > btnValid) & (btnHeld < btnRepeat))
+		{
+			result = 0;					// has not been held enough for repeat
+		}
+		else if (btnHeld >= btnRepeat) 
+		{
+			btnHeld = btnRepeat * 0.75; // repeat & btnHeld set to 3/4 for repeat rate
 		}
 	}
 	
 	return result;
 }
+
+//-----------------------------------------------------------------------------
+// Tests 
+//-----------------------------------------------------------------------------
 
 // Runs a series of checkboard and walking 1/0 tests
 // maxRow, maxCol -> maximum row and column DRAM has
@@ -255,10 +272,10 @@ void doTests(int startAddress, int numBytes, int reps)
 	delay(2000);
 
 	// test with walking 1/0 tests
-	failure |= walkTest(reps, startAddress, numBytes, 0xFF, F("March 0xFF"));
+	failure |= walkTest(reps, startAddress, numBytes, 0xFF, F("Walk 0xFF"));
 	delay(2000);
 
-	failure |= walkTest(reps, startAddress, numBytes, 0x00, F("March 0x00"));
+	failure |= walkTest(reps, startAddress, numBytes, 0x00, F("Walk 0x00"));
 	delay(2000);
 
 	// display final results, shows all C#s that have failures logged
@@ -423,7 +440,7 @@ void logError(int address, byte written, byte read, String lable)
 
 	// serial dump of errors if in verbose mode
 	// ***NOTE: the index==1` test used to find false error when 
-	// changing from C1 to C1, added NOP in setAddress 
+	// changing from C1 to C2
 	if (verbose /*& index == 1*/)
 	{
 		Serial.print(lable + " A:" + String (address, HEX));
@@ -433,7 +450,7 @@ void logError(int address, byte written, byte read, String lable)
 }
 
 //-----------------------------------------------------------------------------
-// HISR handler 
+// ISR handler 
 //-----------------------------------------------------------------------------
 
 // Handles LED flashing

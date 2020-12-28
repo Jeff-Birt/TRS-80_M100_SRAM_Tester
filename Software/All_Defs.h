@@ -46,8 +46,9 @@ enum UISTATES
 {
 	SPLASH, // splash screen
 	BEGIN,  // displays available tests
-	SELECT,	// allows navigating/selecting test
+	SELECT1,// allows navigating/selecting test
 	TIMES,	// lets user select # test reps
+	SELECT2,// allows selecting # reps
 	TEST,	// starts test running
 	CONT,	// pause to show test results
 	AGAIN	// allows user to rerun same test

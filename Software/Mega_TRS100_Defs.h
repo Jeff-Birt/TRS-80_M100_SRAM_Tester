@@ -131,7 +131,7 @@ void initTest()
 // by the 'readBits' and 'writeBits' functions. 
 void setAddress(int address)
 {
-	PORTA = (byte)(address & 0xFF);		// bits 0-7
+	PORTA = (byte)(address & 0xFF);		// address bits 0-7
 	int cePins = (address & 0x1800);	//mask off virtual A11 and A12
 	cePins = cePins >> 11;		// shift A11/A12 to LSB 
 	cePins = 0x01 << cePins;	// shift 0x01 << cePins # to select correct RAM
